@@ -1,0 +1,13 @@
+name: "secret-environment-emulator"
+description: "global envs from special prefixed secrets"
+author: Simon Hessel
+branding:
+  icon: bar-chart-2
+  color: gray-dark
+runs:
+  using: "node12"
+  main: "dist/index.js"
+inputs:
+  secrets:
+    description: Secrets as json
+    required: true
