@@ -24,6 +24,13 @@ const secrets = JSON.stringify({
   PRODUCTION_S3_BUCKET_NAME: "example-production",
 });
 
+const overlayingSecrets = JSON.stringify({
+  ALL_AWS_ACCESS_KEY_ID: "keyid-all",
+  ALL_AWS_SECRET_ACCESS_KEY: "secretkey-all",
+  BUILD_AWS_ACCESS_KEY_ID: "keyid-build",
+  BUILD_AWS_SECRET_ACCESS_KEY: "secretkey-build",
+});
+
 describe("set-env", () => {
   it("set output for staging secrets", () => {
     (<jest.Mock>core.getInput).mockImplementation(
@@ -100,5 +107,24 @@ describe("set-env", () => {
     expect(core.setFailed).toHaveBeenCalledWith("Unexpected end of JSON input");
     expect(process.exit).toHaveBeenCalledTimes(1);
     expect(process.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("set output for overlaying secrets", () => {
+    (<jest.Mock>core.getInput).mockImplementation(
+      createMockedgetInput(overlayingSecrets, "build")
+    );
+
+    jest.isolateModules(() => require("./index"));
+
+    expect(core.setFailed).toHaveBeenCalledTimes(0);
+    expect(core.setOutput).toHaveBeenCalledTimes(2);
+    expect(core.setOutput).toHaveBeenCalledWith(
+      "AWS_ACCESS_KEY_ID",
+      "keyid-build"
+    );
+    expect(core.setOutput).toHaveBeenCalledWith(
+      "AWS_SECRET_ACCESS_KEY",
+      "secretkey-build"
+    );
   });
 });

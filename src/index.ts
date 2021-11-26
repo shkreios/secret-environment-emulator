@@ -1,37 +1,35 @@
 import { getInput, setFailed, setOutput } from "@actions/core";
 
-const setOutputWhenPrefixed = (
-  env: string,
-  key: string,
-  value: string
-): boolean => {
-  const prefix = `${env}_`;
-  if (key.startsWith(prefix)) {
-    setOutput(key.slice(prefix.length), value);
-    return true;
-  }
-  return false;
-};
-
 const main = () => {
   try {
     const data: Record<string, string> = JSON.parse(
       getInput("secrets", { required: true })
     );
-    const environment = getInput("environment", {
-      required: false,
-      trimWhitespace: true,
-    }).toLocaleUpperCase();
-    const globalPrefix = getInput("globalPrefix", {
-      required: false,
-      trimWhitespace: true,
-    }).toLocaleUpperCase();
+    const environment =
+      getInput("environment", {
+        required: false,
+        trimWhitespace: true,
+      }).toLocaleUpperCase() + "_";
+    const globalPrefix =
+      getInput("globalPrefix", {
+        required: false,
+        trimWhitespace: true,
+      }).toLocaleUpperCase() + "_";
 
-    Object.entries(data).forEach(
-      ([key, value]) =>
-        setOutputWhenPrefixed(environment, key, value) ||
-        setOutputWhenPrefixed(globalPrefix, key, value)
-    );
+    const output: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(data)) {
+      if (key.startsWith(environment)) {
+        output[key.slice(environment.length)] = value;
+      } else if (
+        key.startsWith(globalPrefix) &&
+        !(key.slice(globalPrefix.length) in output)
+      ) {
+        output[key.slice(globalPrefix.length)] = value;
+      }
+    }
+
+    Object.entries(output).forEach(([key, value]) => setOutput(key, value));
   } catch (error) {
     setFailed((error as Error).message);
     process.exit(1);
