@@ -11,3 +11,10 @@ inputs:
   secrets:
     description: Secrets as json
     required: true
+  environment:
+    description: The environment prefix
+    required: true
+  globalPrefix:
+    description: The global prefix
+    required: false
+    default: ALL
