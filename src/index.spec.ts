@@ -1,82 +1,104 @@
-import * as core from "@actions/core";
-
+import core from "@actions/core";
+const mockedCore = core as jest.Mocked<typeof core>;
 jest.mock("@actions/core", () => ({
-  exportVariable: jest.fn(),
+  setOutput: jest.fn(),
   getInput: jest.fn(),
   setFailed: jest.fn(),
 }));
 
+jest.spyOn(process, "exit").mockImplementation((code?: number): never => {
+  throw new Error(`${code}`);
+});
+
+const createMockedgetInput =
+  (secrets: string, environment: string, globalPrefix = "all") =>
+  (key: string) => {
+    if (key == "secrets") return secrets;
+    if (key == "environment") return environment;
+    if (key == "globalPrefix") return globalPrefix;
+  };
+const secrets = JSON.stringify({
+  github_token: "***",
+  ALL_REACT_APP_AWS_COGNITO_REGION: "eu-west-1",
+  STAGING_S3_BUCKET_NAME: "example-staging",
+  PRODUCTION_S3_BUCKET_NAME: "example-production",
+});
+
 describe("set-env", () => {
-  afterEach(() => {
-    Object.keys(process.env)
-      .filter((key) => key.match(/^INPUT_/))
-      .forEach((key) => {
-        delete process.env[key];
-      });
-  });
-
-  it("exports all environment variables beginning with INPUT_", () => {
-    process.env.INPUT_VERSION = "1.2.3";
-
-    jest.isolateModules(() => require("./index"));
-
-    expect(core.exportVariable).toHaveBeenCalledTimes(1);
-    expect(core.exportVariable).toHaveBeenCalledWith("VERSION", "1.2.3");
-  });
-
-  it("exports multiple environment variables beginning with INPUT_", () => {
-    process.env.INPUT_A = "1";
-    process.env.INPUT_B = "2";
-    process.env.INPUT_C = "3";
-
-    jest.isolateModules(() => require("./index"));
-
-    expect(core.exportVariable).toHaveBeenCalledTimes(3);
-    expect(core.exportVariable).toHaveBeenCalledWith("A", "1");
-    expect(core.exportVariable).toHaveBeenCalledWith("B", "2");
-    expect(core.exportVariable).toHaveBeenCalledWith("C", "3");
-  });
-
-  it("overwrites existing environment variables", () => {
-    jest.spyOn(process, "exit").mockImplementation((code?: number): never => {
-      throw new Error(`${code}`);
-    });
-
-    process.env.EXISTING = "one";
-    process.env.INPUT_EXISTING = "two";
-
-    (<jest.Mock>core.getInput).mockImplementation(() => "true");
-
-    jest.isolateModules(() =>
-      expect(() => require("./index")).not.toThrowError()
+  it("set output for staging secrets", () => {
+    (<jest.Mock>core.getInput).mockImplementation(
+      createMockedgetInput(secrets, "staging")
     );
 
-    expect(core.exportVariable).toHaveBeenCalledWith("EXISTING", "two");
+    jest.isolateModules(() => require("./index"));
+
+    expect(core.setFailed).toHaveBeenCalledTimes(0);
+    expect(core.setOutput).toHaveBeenCalledTimes(2);
+    expect(core.setOutput).toHaveBeenCalledWith(
+      "REACT_APP_AWS_COGNITO_REGION",
+      "eu-west-1"
+    );
+    expect(core.setOutput).toHaveBeenCalledWith(
+      "S3_BUCKET_NAME",
+      "example-staging"
+    );
   });
 
-  describe("exceptions", () => {
-    beforeEach(() => {
-      jest.spyOn(process, "exit").mockImplementation((code?: number): never => {
-        throw new Error(`${code}`);
-      });
-    });
+  it("set output for production secrets", () => {
+    (<jest.Mock>core.getInput).mockImplementation(
+      createMockedgetInput(secrets, "production")
+    );
 
-    it("reports exceptions", () => {
-      (<jest.Mock>core.exportVariable).mockImplementation(() => {
-        throw new Error("FAIL");
-      });
-      jest.spyOn(process, "exit").mockImplementation((code?: number): never => {
-        throw new Error(`${code}`);
-      });
+    jest.isolateModules(() => require("./index"));
 
-      process.env.INPUT_TEST = "test";
+    expect(core.setFailed).toHaveBeenCalledTimes(0);
+    expect(core.setOutput).toHaveBeenCalledTimes(2);
+    expect(core.setOutput).toHaveBeenCalledWith(
+      "REACT_APP_AWS_COGNITO_REGION",
+      "eu-west-1"
+    );
+    expect(core.setOutput).toHaveBeenCalledWith(
+      "S3_BUCKET_NAME",
+      "example-production"
+    );
+  });
 
-      jest.isolateModules(() =>
-        expect(() => require("./index")).toThrowError()
-      );
+  it("set output for qa secrets", () => {
+    (<jest.Mock>core.getInput).mockImplementation(
+      createMockedgetInput(secrets, "qa")
+    );
 
-      expect(core.setFailed).toHaveBeenCalledTimes(1);
-      expect(core.setFailed).toHaveBeenCalledWith("FAIL");
-    });
+    jest.isolateModules(() => require("./index"));
+
+    expect(core.setFailed).toHaveBeenCalledTimes(0);
+    expect(core.setOutput).toHaveBeenCalledTimes(1);
+    expect(core.setOutput).toHaveBeenCalledWith(
+      "REACT_APP_AWS_COGNITO_REGION",
+      "eu-west-1"
+    );
+  });
+
+  it("set output for globalPrefix test secrets", () => {
+    (<jest.Mock>core.getInput).mockImplementation(
+      createMockedgetInput(secrets, "qa", "test")
+    );
+
+    jest.isolateModules(() => require("./index"));
+
+    expect(core.setFailed).toHaveBeenCalledTimes(0);
+    expect(core.setOutput).toHaveBeenCalledTimes(0);
+  });
+
+  it("malformed json exception", () => {
+    (<jest.Mock>core.getInput).mockImplementation(
+      createMockedgetInput("{", "staging")
+    );
+
+    jest.isolateModules(() => require("./index"));
+
+    expect(core.setFailed).toHaveBeenCalledTimes(1);
+    expect(core.setFailed).toHaveBeenCalledWith("Unexpected end of JSON input");
+    expect(process.exit).toHaveBeenCalledTimes(1);
+    expect(process.exit).toHaveBeenCalledWith(1);
   });
 });

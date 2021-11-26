@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc && npm run package",
     "package": "ncc build -m",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "test": "jest"
   },
   "author": "Simon Hessel",
   "license": "MIT",
