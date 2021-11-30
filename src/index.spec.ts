@@ -1,22 +1,50 @@
 import core from "@actions/core";
-const mockedCore = core as jest.Mocked<typeof core>;
+import { run } from "./run";
+
+import { mocked } from "ts-jest/utils";
 jest.mock("@actions/core", () => ({
-  setOutput: jest.fn(),
   getInput: jest.fn(),
+  setOutput: jest.fn(),
   setFailed: jest.fn(),
 }));
 
-jest.spyOn(process, "exit").mockImplementation((code?: number): never => {
-  throw new Error(`${code}`);
-});
+jest
+  .spyOn(process, "exit")
+  .mockImplementation((code?: number) => undefined as never);
 
-const createMockedgetInput =
-  (secrets: string, environment: string, globalPrefix = "all") =>
-  (key: string) => {
-    if (key == "secrets") return secrets;
-    if (key == "environment") return environment;
-    if (key == "globalPrefix") return globalPrefix;
+interface Input {
+  secrets?: string;
+  environment?: string;
+  globalPrefix?: string;
+}
+
+const isKey = <T extends object>(
+  key: string | symbol | number,
+  obj: T
+): key is keyof T => key in obj;
+
+const createMockedgetInput = (inputs: Input): typeof core.getInput => {
+  const mergedInputs: Input = { globalPrefix: "all", ...inputs };
+  return (key, options) => {
+    if (isKey(key, mergedInputs)) {
+      return mergedInputs[key] || "";
+    } else {
+      if (options?.required)
+        throw new Error(`Input required and not supplied: ${key}`);
+      return "";
+    }
   };
+};
+
+const mockgetInput = (inputs: Input) =>
+  mocked(core.getInput).mockImplementation(createMockedgetInput(inputs));
+
+const prepareTest = (inputs: Input) =>
+  beforeEach(() => {
+    mockgetInput(inputs);
+    run();
+  });
+
 const secrets = JSON.stringify({
   github_token: "***",
   ALL_REACT_APP_AWS_COGNITO_REGION: "eu-west-1",
@@ -31,100 +59,91 @@ const overlayingSecrets = JSON.stringify({
   BUILD_AWS_SECRET_ACCESS_KEY: "secretkey-build",
 });
 
-describe("set-env", () => {
-  it("set output for staging secrets", () => {
-    (<jest.Mock>core.getInput).mockImplementation(
-      createMockedgetInput(secrets, "staging")
-    );
+describe("Tests for secret-environment-emulator action", () => {
+  describe("Environment is set to staging and globalPrefix is the default", () => {
+    prepareTest({ secrets, environment: "staging" });
 
-    jest.isolateModules(() => require("./index"));
+    it("Should not fail", () =>
+      expect(core.setFailed).toHaveBeenCalledTimes(0));
 
-    expect(core.setFailed).toHaveBeenCalledTimes(0);
-    expect(core.setOutput).toHaveBeenCalledTimes(2);
-    expect(core.setOutput).toHaveBeenCalledWith(
-      "REACT_APP_AWS_COGNITO_REGION",
-      "eu-west-1"
-    );
-    expect(core.setOutput).toHaveBeenCalledWith(
-      "S3_BUCKET_NAME",
-      "example-staging"
-    );
+    it("2 outputs should be generated", () =>
+      expect(core.setOutput).toHaveBeenCalledTimes(2));
+
+    it("REACT_APP_AWS_COGNITO_REGION should be set eu-west-1", () =>
+      expect(core.setOutput).toHaveBeenCalledWith(
+        "REACT_APP_AWS_COGNITO_REGION",
+        "eu-west-1"
+      ));
+
+    it("S3_BUCKET_NAME should be set example-staging", () =>
+      expect(core.setOutput).toHaveBeenCalledWith(
+        "S3_BUCKET_NAME",
+        "example-staging"
+      ));
   });
 
-  it("set output for production secrets", () => {
-    (<jest.Mock>core.getInput).mockImplementation(
-      createMockedgetInput(secrets, "production")
-    );
+  describe("Environment is set to qa and globalPrefix is set to test", () => {
+    prepareTest({
+      secrets,
+      environment: "qa",
+      globalPrefix: "test",
+    });
 
-    jest.isolateModules(() => require("./index"));
+    it("Should not fail", () =>
+      expect(core.setFailed).toHaveBeenCalledTimes(0));
 
-    expect(core.setFailed).toHaveBeenCalledTimes(0);
-    expect(core.setOutput).toHaveBeenCalledTimes(2);
-    expect(core.setOutput).toHaveBeenCalledWith(
-      "REACT_APP_AWS_COGNITO_REGION",
-      "eu-west-1"
-    );
-    expect(core.setOutput).toHaveBeenCalledWith(
-      "S3_BUCKET_NAME",
-      "example-production"
-    );
+    it("Ouput should be empty", () =>
+      expect(core.setOutput).toHaveBeenCalledTimes(0));
   });
 
-  it("set output for qa secrets", () => {
-    (<jest.Mock>core.getInput).mockImplementation(
-      createMockedgetInput(secrets, "qa")
-    );
+  describe("Secrets are set to malformed json", () => {
+    prepareTest({ secrets: "{", environment: "staging" });
 
-    jest.isolateModules(() => require("./index"));
+    it("Action should alert the user", () => {
+      expect(core.setFailed).toHaveBeenCalledTimes(1);
+      expect(core.setFailed).toHaveBeenCalledWith(
+        new Error(
+          `Please check if you pass a correct json string into secrets.`
+        )
+      );
+    });
 
-    expect(core.setFailed).toHaveBeenCalledTimes(0);
-    expect(core.setOutput).toHaveBeenCalledTimes(1);
-    expect(core.setOutput).toHaveBeenCalledWith(
-      "REACT_APP_AWS_COGNITO_REGION",
-      "eu-west-1"
-    );
+    it("Action should exit with 1", () =>
+      expect(process.exit).toHaveBeenCalledTimes(1));
   });
 
-  it("set output for globalPrefix test secrets", () => {
-    (<jest.Mock>core.getInput).mockImplementation(
-      createMockedgetInput(secrets, "qa", "test")
-    );
+  describe("Environment is not set", () => {
+    prepareTest({ secrets });
 
-    jest.isolateModules(() => require("./index"));
+    it("Action should alert the user", () => {
+      expect(core.setFailed).toHaveBeenCalledTimes(1);
+      expect(core.setFailed).toHaveBeenCalledWith(
+        new Error(`Input required and not supplied: environment`)
+      );
+    });
 
-    expect(core.setFailed).toHaveBeenCalledTimes(0);
-    expect(core.setOutput).toHaveBeenCalledTimes(0);
+    it("Action should exit with 1", () => {
+      expect(process.exit).toHaveBeenCalledTimes(1);
+    });
   });
 
-  it("malformed json exception", () => {
-    (<jest.Mock>core.getInput).mockImplementation(
-      createMockedgetInput("{", "staging")
-    );
+  describe("Secrets have overlaying keys", () => {
+    prepareTest({
+      secrets: overlayingSecrets,
+      environment: "build",
+    });
 
-    jest.isolateModules(() => require("./index"));
-
-    expect(core.setFailed).toHaveBeenCalledTimes(1);
-    expect(core.setFailed).toHaveBeenCalledWith("Unexpected end of JSON input");
-    expect(process.exit).toHaveBeenCalledTimes(1);
-    expect(process.exit).toHaveBeenCalledWith(1);
-  });
-
-  it("set output for overlaying secrets", () => {
-    (<jest.Mock>core.getInput).mockImplementation(
-      createMockedgetInput(overlayingSecrets, "build")
-    );
-
-    jest.isolateModules(() => require("./index"));
-
-    expect(core.setFailed).toHaveBeenCalledTimes(0);
-    expect(core.setOutput).toHaveBeenCalledTimes(2);
-    expect(core.setOutput).toHaveBeenCalledWith(
-      "AWS_ACCESS_KEY_ID",
-      "keyid-build"
-    );
-    expect(core.setOutput).toHaveBeenCalledWith(
-      "AWS_SECRET_ACCESS_KEY",
-      "secretkey-build"
-    );
+    it("set output for overlaying secrets", () => {
+      expect(core.setFailed).toHaveBeenCalledTimes(0);
+      expect(core.setOutput).toHaveBeenCalledTimes(2);
+      expect(core.setOutput).toHaveBeenCalledWith(
+        "AWS_ACCESS_KEY_ID",
+        "keyid-build"
+      );
+      expect(core.setOutput).toHaveBeenCalledWith(
+        "AWS_SECRET_ACCESS_KEY",
+        "secretkey-build"
+      );
+    });
   });
 });
