@@ -1,7 +1,7 @@
 import core from "@actions/core";
 import { run } from "./run";
+import { mocked } from "jest-mock";
 
-import { mocked } from "ts-jest/utils";
 jest.mock("@actions/core", () => ({
   getInput: jest.fn(),
   setOutput: jest.fn(),
